@@ -15,6 +15,7 @@ const guestSchema = new mongoose.Schema(
     phone: { type: String, required: [true, 'Phone number is required'], trim: true },
     nationality: { type: String, trim: true },
     idType: {
+      
       type: String,
       enum: ['passport', 'national_id', 'drivers_license', 'other'],
     },

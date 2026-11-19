@@ -1,6 +1,5 @@
 const { Router } = require('express');
 const mongoose = require('mongoose');
-const guestRoutes = require('./guest.routes');
 
 const router = Router();
 
@@ -16,6 +15,24 @@ router.get('/health', (req, res) => {
   });
 });
 
-router.use('/guests', guestRoutes);
+router.use('/auth', require('./auth.routes'));
+router.use('/guests', require('./guest.routes'));
+router.use('/staff', require('./staff.routes'));
+router.use('/admin', require('./admin.routes'));
+router.use('/notifications', require('./notification.routes'));
+
+// Squad A: booking and payments
+router.use('/rooms', require('./room.routes'));
+router.use('/bookings', require('./booking.routes'));
+router.use('/payments', require('./payment.routes'));
+
+// Squad B: check-in and room access
+router.use('/check-in', require('./checkIn.routes'));
+router.use('/access', require('./access.routes'));
+router.use('/lock', require('./lock.routes'));
+
+// Squad C: guest services
+router.use('/service-requests', require('./serviceRequest.routes'));
+router.use('/recommendations', require('./recommendation.routes'));
 
 module.exports = router;

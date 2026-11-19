@@ -1,12 +1,13 @@
 const Guest = require('../models/guest.model');
+const Booking = require('../models/booking.model');
 const ApiError = require('../utils/ApiError');
+const { assertObjectId, pick, parsePagination, paginationMeta, escapeRegex } = require('../utils/validation');
 
-const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Staff-facing guest management. Guests manage their own profile via /auth/me.
 
-// GET /api/guests?page=1&limit=20&search=john
+// GET /guests?page=1&limit=20&search=john
 async function listGuests(req, res) {
-  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+  const { page, limit, skip } = parsePagination(req.query);
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
   const filter = {};
@@ -16,48 +17,47 @@ async function listGuests(req, res) {
   }
 
   const [guests, total] = await Promise.all([
-    Guest.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
+    Guest.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
     Guest.countDocuments(filter),
   ]);
 
-  res.json({
-    success: true,
-    data: guests,
-    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-  });
+  res.json({ success: true, data: guests, pagination: paginationMeta(page, limit, total) });
 }
 
-// GET /api/guests/:id
+// GET /guests/:id
 async function getGuest(req, res) {
+  assertObjectId(req.params.id);
   const guest = await Guest.findById(req.params.id);
   if (!guest) throw ApiError.notFound('Guest not found');
-  res.json({ success: true, data: guest });
+
+  const bookings = await Booking.find({ guest: guest._id })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .select('reference status paymentStatus checkInDate checkOutDate roomSnapshot amount currency');
+
+  res.json({ success: true, data: { ...guest.toJSON(), bookings } });
 }
 
-// POST /api/guests
-async function createGuest(req, res) {
-  const guest = await Guest.create(req.body);
-  res.status(201).json({ success: true, data: guest });
-}
-
-// PATCH /api/guests/:id
+// PATCH /guests/:id
 async function updateGuest(req, res) {
-  const guest = await Guest.findByIdAndUpdate(req.params.id, req.body, {
-    returnDocument: 'after',
-    runValidators: true,
-  });
+  assertObjectId(req.params.id);
+  const guest = await Guest.findById(req.params.id);
   if (!guest) throw ApiError.notFound('Guest not found');
+
+  guest.set(pick(req.body, ['firstName', 'lastName', 'phone', 'nationality', 'address', 'preferences', 'notes']));
+  await guest.save();
   res.json({ success: true, data: guest });
 }
 
-// DELETE /api/guests/:id
+// DELETE /guests/:id
 async function deleteGuest(req, res) {
+  assertObjectId(req.params.id);
+  const activeStay = await Booking.exists({ guest: req.params.id, status: { $in: ['confirmed', 'checked_in'] } });
+  if (activeStay) throw ApiError.conflict('Guest has an active booking and cannot be deleted');
+
   const guest = await Guest.findByIdAndDelete(req.params.id);
   if (!guest) throw ApiError.notFound('Guest not found');
   res.status(204).end();
 }
 
-module.exports = { listGuests, getGuest, createGuest, updateGuest, deleteGuest };
+module.exports = { listGuests, getGuest, updateGuest, deleteGuest };

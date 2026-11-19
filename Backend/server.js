@@ -1,6 +1,7 @@
 const app = require('./app');
 const { port, nodeEnv } = require('./config/env');
 const { connectDB, disconnectDB } = require('./config/db');
+const { startBookingJobs, runBookingJobs } = require('./jobs/booking.jobs');
 
 async function start() {
   try {
@@ -11,11 +12,16 @@ async function start() {
   }
 
   const server = app.listen(port, () => {
-    console.log(`KeylessFlow API running in ${nodeEnv} mode on http://localhost:${port}`);
+    console.log(`KeylessFlow API running in ${nodeEnv} mode on http://localhost:${port}/api/v1`);
   });
+
+  // Expire unpaid holds and send booking reminders in the background
+  runBookingJobs();
+  const jobsTimer = startBookingJobs();
 
   const shutdown = (signal) => {
     console.log(`${signal} received, shutting down...`);
+    clearInterval(jobsTimer);
     server.close(async () => {
       await disconnectDB();
       process.exit(0);

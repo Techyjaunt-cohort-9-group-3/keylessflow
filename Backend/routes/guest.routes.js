@@ -1,15 +1,14 @@
 const { Router } = require('express');
-const {
-  listGuests,
-  getGuest,
-  createGuest,
-  updateGuest,
-  deleteGuest,
-} = require('../controllers/guest.controller');
+const c = require('../controllers/guest.controller');
+const { authenticate, allow } = require('../middlewares/auth');
 
 const router = Router();
 
-router.route('/').get(listGuests).post(createGuest);
-router.route('/:id').get(getGuest).patch(updateGuest).delete(deleteGuest);
+// Staff-facing guest management. Guests use /auth/me for their own profile.
+router.use(authenticate, allow('staff', 'admin'));
+router.get('/', c.listGuests);
+router.get('/:id', c.getGuest);
+router.patch('/:id', c.updateGuest);
+router.delete('/:id', allow('admin'), c.deleteGuest);
 
 module.exports = router;

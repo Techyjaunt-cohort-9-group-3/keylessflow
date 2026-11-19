@@ -1,47 +1,82 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { getErrorMessage } from "../api/client";
+import { createBooking } from "../api/services";
 import addIcon from "../assets/Add-icon.png";
 import calendarIcon from "../assets/calender-icon.png";
 import checkedIcon from "../assets/checked-icon.png";
-import feeIcon from "../assets/fee-icon.png";
 import guestIcon from "../assets/guest-icon.png";
 import locationIcon from "../assets/location-icon.png";
 import padlockIcon from "../assets/jam_padlock-f.png";
+import { formatDate, formatNaira, nightsBetween, plural } from "../utils/format";
+
+const inputClass =
+  "w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600";
 
 export default function StepTwo({
   room,
+  user,
   stayDetails,
-  setStayDetails,
   guestDetails,
   setGuestDetails,
   onBack,
-  onContinue,
+  onRequireLogin,
+  onBookingCreated,
 }) {
-  // 10:00 (600 seconds) countdown starts immediately when entering Step 2
-  const [secondsLeft, setSecondsLeft] = useState(600);
-  const [showSpecialRequest, setShowSpecialRequest] = useState(false);
+  const [showSpecialRequest, setShowSpecialRequest] = useState(
+    Boolean(guestDetails.specialRequest),
+  );
   const [isEditingDates, setIsEditingDates] = useState(false);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    setSecondsLeft(600);
-    const timer = setInterval(() => {
-      setSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  const minutes = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
-  const seconds = String(secondsLeft % 60).padStart(2, "0");
-
-  const nights = stayDetails.nights || 2;
-  const nightlyRate = room?.nightlyRate > 0 ? room.nightlyRate : 80000;
-  const roomSubtotal = nightlyRate * nights;
-  const taxesAndFees = 10000;
-  const totalAmount = roomSubtotal + taxesAndFees;
+  const nights = nightsBetween(stayDetails.checkInIso, stayDetails.checkOutIso);
+  // The API charges the nightly rate times the number of nights
+  const totalAmount = room.pricePerNight * nights;
 
   const handleGuestFieldChange = (e) => {
     const { name, value } = e.target;
     setGuestDetails((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleContinue = async () => {
+    setError("");
+
+    if (!user) {
+      onRequireLogin();
+      return;
+    }
+    if (user.type !== "guest") {
+      setError("Staff accounts cannot make bookings. Log in with a guest account.");
+      return;
+    }
+
+    const { firstName, lastName, phone, email, specialRequest } = guestDetails;
+    if (![firstName, lastName, phone, email].every((value) => value.trim())) {
+      setError("Please fill in your name, phone number and email.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Creates the booking and holds the room while the guest pays
+      const booking = await createBooking({
+        roomId: room._id,
+        checkInDate: stayDetails.checkInIso,
+        checkOutDate: stayDetails.checkOutIso,
+        numberOfGuests: stayDetails.guests,
+        guestDetails: {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+        },
+        specialRequests: specialRequest.trim() || undefined,
+      });
+      onBookingCreated(booking);
+    } catch (err) {
+      setError(getErrorMessage(err));
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -84,10 +119,10 @@ export default function StepTwo({
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="selected-room-title text-lg font-bold text-slate-900">
-                  {room?.name || "Deluxe room"}
+                  {room.name}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  {room?.view || "City view"} · {room?.bed || "King bed"}
+                  Room {room.roomNumber} · {room.bedType} bed
                 </p>
               </div>
               <button
@@ -119,7 +154,7 @@ export default function StepTwo({
                     Check-in
                   </span>
                   <span className="text-sm font-semibold text-slate-800">
-                    {stayDetails.checkIn}
+                    {formatDate(stayDetails.checkInIso, false)}
                   </span>
                 </div>
               </div>
@@ -131,12 +166,12 @@ export default function StepTwo({
                   Check-out
                 </span>
                 <span className="text-sm font-semibold text-slate-800">
-                  {stayDetails.checkOut}
+                  {formatDate(stayDetails.checkOutIso, false)}
                 </span>
               </div>
 
               <span className="text-xs font-semibold bg-slate-200/80 text-slate-700 px-2.5 py-1 rounded-lg">
-                {nights} nights
+                {plural(nights, "night")}
               </span>
             </div>
 
@@ -162,16 +197,20 @@ export default function StepTwo({
                   alt="Guests"
                   className="w-3.5 h-3.5 object-contain"
                 />
-                <span>{stayDetails.guests} guests</span>
+                <span>{plural(stayDetails.guests, "guest")}</span>
               </span>
               <span className="mx-2">•</span>
-              <span>{room?.bed || "King bed"}</span>
-              <span className="mx-2">•</span>
-              <span>{room?.view || "City view"}</span>
+              <span>{room.bedType} bed</span>
+              {room.sizeSqm && (
+                <>
+                  <span className="mx-2">•</span>
+                  <span>{room.sizeSqm} sqm</span>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Guest Details Form (Placeholders Only) */}
+          {/* Guest Details Form */}
           <div
             id="guest-details-form-card"
             className="guest-details-card bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4"
@@ -185,23 +224,52 @@ export default function StepTwo({
               </span>
             </div>
 
+            {!user && (
+              <div className="bg-indigo-50 border border-indigo-100 text-indigo-800 rounded-xl px-4 py-3 text-xs">
+                Log in or sign up to book. We&apos;ll fill in your details for
+                you.
+              </div>
+            )}
+
             <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="guest-full-name"
-                  className="text-xs font-medium text-slate-500 block mb-1"
-                >
-                  Full name
-                </label>
-                <input
-                  id="guest-full-name"
-                  name="fullName"
-                  type="text"
-                  placeholder="Full name"
-                  value={guestDetails.fullName}
-                  onChange={handleGuestFieldChange}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="guest-first-name"
+                    className="text-xs font-medium text-slate-500 block mb-1"
+                  >
+                    First name
+                  </label>
+                  <input
+                    id="guest-first-name"
+                    name="firstName"
+                    type="text"
+                    autoComplete="given-name"
+                    placeholder="First name"
+                    value={guestDetails.firstName}
+                    onChange={handleGuestFieldChange}
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="guest-last-name"
+                    className="text-xs font-medium text-slate-500 block mb-1"
+                  >
+                    Last name
+                  </label>
+                  <input
+                    id="guest-last-name"
+                    name="lastName"
+                    type="text"
+                    autoComplete="family-name"
+                    placeholder="Last name"
+                    value={guestDetails.lastName}
+                    onChange={handleGuestFieldChange}
+                    className={inputClass}
+                  />
+                </div>
               </div>
 
               <div>
@@ -215,10 +283,11 @@ export default function StepTwo({
                   id="guest-phone-number"
                   name="phone"
                   type="tel"
+                  autoComplete="tel"
                   placeholder="Phone number"
                   value={guestDetails.phone}
                   onChange={handleGuestFieldChange}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600"
+                  className={inputClass}
                 />
               </div>
 
@@ -233,10 +302,11 @@ export default function StepTwo({
                   id="guest-email-address"
                   name="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="Email"
                   value={guestDetails.email}
                   onChange={handleGuestFieldChange}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600"
+                  className={inputClass}
                 />
               </div>
 
@@ -259,6 +329,7 @@ export default function StepTwo({
                     id="guest-special-requests"
                     name="specialRequest"
                     rows="2"
+                    maxLength={1000}
                     placeholder="Late check-in, high floor, extra pillows..."
                     value={guestDetails.specialRequest}
                     onChange={handleGuestFieldChange}
@@ -269,7 +340,7 @@ export default function StepTwo({
             </div>
           </div>
 
-          {/* Cancellation Policy Banner */}
+          {/* Policy Banner */}
           <div className="cancellation-policy-banner bg-white p-4 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center space-x-2.5">
             <img
               src={checkedIcon}
@@ -277,22 +348,20 @@ export default function StepTwo({
               className="w-4 h-4 object-contain shrink-0"
             />
             <span>
-              Free cancellation before 18 Nov · No hidden booking or credit card
+              Free cancellation until you pay · No hidden booking or credit card
               fees
             </span>
           </div>
         </div>
 
-        {/* Right Column: Live Hold Timer + Price Breakdown */}
+        {/* Right Column: Hold Notice + Price Breakdown */}
         <aside className="review-sidebar space-y-4">
           <div
-            id="room-hold-timer"
-            className="hold-timer-card bg-amber-50 border border-amber-200/80 p-3.5 rounded-xl flex items-center justify-between text-xs text-amber-900 font-medium"
+            id="room-hold-notice"
+            className="hold-timer-card bg-amber-50 border border-amber-200/80 p-3.5 rounded-xl text-xs text-amber-900 font-medium"
           >
-            <span>Room held for you</span>
-            <span className="font-bold tabular-nums">
-              {minutes}:{seconds} min left
-            </span>
+            We hold this room for you for 30 minutes once you continue to
+            payment.
           </div>
 
           <div
@@ -304,24 +373,12 @@ export default function StepTwo({
             </h2>
 
             <div className="space-y-2.5 text-sm text-slate-600">
-              <div className="flex justify-between">
-                <span>Room × {nights} nights</span>
-                <span className="font-semibold text-slate-900">
-                  ₦{roomSubtotal.toLocaleString()}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-                <span className="inline-flex items-center space-x-1.5">
-                  <span>Taxes and fees</span>
-                  <img
-                    src={feeIcon}
-                    alt="Fee info"
-                    className="w-3.5 h-3.5 object-contain"
-                  />
+              <div className="flex justify-between pb-3 border-b border-slate-100">
+                <span>
+                  {formatNaira(room.pricePerNight)} × {plural(nights, "night")}
                 </span>
                 <span className="font-semibold text-slate-900">
-                  ₦{taxesAndFees.toLocaleString()}
+                  {formatNaira(totalAmount)}
                 </span>
               </div>
 
@@ -330,18 +387,34 @@ export default function StepTwo({
                   Total
                 </span>
                 <span className="font-extrabold text-indigo-600 text-xl">
-                  ₦{totalAmount.toLocaleString()}
+                  {formatNaira(totalAmount)}
                 </span>
               </div>
             </div>
 
+            {error && (
+              <div
+                role="alert"
+                className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-3 py-2.5 text-xs"
+              >
+                {error}
+              </div>
+            )}
+
             <button
               type="button"
               id="continue-to-payment-btn"
-              onClick={() => onContinue(totalAmount)}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer"
+              onClick={handleContinue}
+              disabled={isSubmitting}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition-colors flex items-center justify-center space-x-2 shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <span>Continue to payment</span>
+              <span>
+                {isSubmitting
+                  ? "Holding your room..."
+                  : user
+                    ? "Continue to payment"
+                    : "Log in to continue"}
+              </span>
               <span aria-hidden="true">→</span>
             </button>
 

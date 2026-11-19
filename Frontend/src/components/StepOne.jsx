@@ -1,25 +1,72 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getErrorMessage } from "../api/client";
+import { getAvailableRooms } from "../api/services";
 import calendarIcon from "../assets/calender-icon.png";
 import guestIcon from "../assets/guest-icon.png";
 import locationIcon from "../assets/location-icon.png";
 import padlockIcon from "../assets/jam_padlock-f.png";
+import {
+  dateFromToday,
+  formatDate,
+  formatNaira,
+  nightsBetween,
+  plural,
+} from "../utils/format";
 
-export default function StepOne({
-  rooms,
-  stayDetails,
-  setStayDetails,
-  onSelectRoom,
-}) {
+export default function StepOne({ stayDetails, setStayDetails, onSelectRoom }) {
   const roomListSectionRef = useRef(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isGuestMenuOpen, setIsGuestMenuOpen] = useState(false);
-  const [alertedRoomIds, setAlertedRoomIds] = useState([]);
+  const [rooms, setRooms] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const nights = nightsBetween(stayDetails.checkInIso, stayDetails.checkOutIso);
+  const availableCount = rooms.filter((room) => room.isAvailable).length;
+
+  const loadRooms = async () => {
+    if (nights < 1) {
+      setError("Check-out must be at least one day after check-in.");
+      setRooms([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+    try {
+      const data = await getAvailableRooms({
+        checkInDate: stayDetails.checkInIso,
+        checkOutDate: stayDetails.checkOutIso,
+        guests: stayDetails.guests,
+        includeUnavailable: true,
+      });
+      setRooms(data);
+    } catch (err) {
+      setError(getErrorMessage(err));
+      setRooms([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load rooms for the current dates when the page opens
+  useEffect(() => {
+    loadRooms();
+  }, []);
 
   const handleCheckAvailability = () => {
+    setIsDatePickerOpen(false);
+    setIsGuestMenuOpen(false);
     roomListSectionRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "start",
     });
+    loadRooms();
+  };
+
+  const updateDate = (field, value) => {
+    setStayDetails((prev) => ({ ...prev, [field]: value }));
   };
 
   const updateGuests = (delta) => {
@@ -27,21 +74,6 @@ export default function StepOne({
       ...prev,
       guests: Math.max(1, Math.min(6, prev.guests + delta)),
     }));
-  };
-
-  const updateRoomsCount = (delta) => {
-    setStayDetails((prev) => ({
-      ...prev,
-      roomsCount: Math.max(1, Math.min(4, prev.roomsCount + delta)),
-    }));
-  };
-
-  const toggleAlertRoom = (roomId) => {
-    setAlertedRoomIds((prev) =>
-      prev.includes(roomId)
-        ? prev.filter((id) => id !== roomId)
-        : [...prev, roomId],
-    );
   };
 
   return (
@@ -95,7 +127,7 @@ export default function StepOne({
                   Check-in
                 </span>
                 <span className="field-value font-semibold text-slate-800 text-sm">
-                  {stayDetails.checkIn}
+                  {formatDate(stayDetails.checkInIso, false)}
                 </span>
               </div>
             </div>
@@ -107,7 +139,7 @@ export default function StepOne({
                 Check-out
               </span>
               <span className="field-value font-semibold text-slate-800 text-sm">
-                {stayDetails.checkOut}
+                {formatDate(stayDetails.checkOutIso, false)}
               </span>
             </div>
           </div>
@@ -125,8 +157,7 @@ export default function StepOne({
                   Guests
                 </span>
                 <span className="field-value font-semibold text-slate-800 text-sm">
-                  {stayDetails.guests} guests · {stayDetails.roomsCount}{" "}
-                  {stayDetails.roomsCount === 1 ? "room" : "rooms"}
+                  {plural(stayDetails.guests, "guest")} · 1 room
                 </span>
               </div>
             </div>
@@ -136,7 +167,7 @@ export default function StepOne({
               id="guest-arrow-toggle-btn"
               onClick={() => setIsGuestMenuOpen((prev) => !prev)}
               aria-expanded={isGuestMenuOpen}
-              aria-label="Toggle guest and stay quick options"
+              aria-label="Change number of guests"
               className="guest-arrow-btn p-1.5 rounded-lg hover:bg-slate-200/70 text-slate-600 transition-colors cursor-pointer"
             >
               <span
@@ -148,7 +179,7 @@ export default function StepOne({
           </div>
         </div>
 
-        {/* Expandable Date Picker Panel when Calendar Icon is Clicked */}
+        {/* Date picker, opened by the calendar icon */}
         {isDatePickerOpen && (
           <div
             id="date-picker-drawer"
@@ -164,20 +195,9 @@ export default function StepOne({
               <input
                 id="checkin-date-input"
                 type="date"
+                min={dateFromToday(0)}
                 value={stayDetails.checkInIso}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setStayDetails((prev) => ({
-                    ...prev,
-                    checkInIso: val,
-                    checkIn: val
-                      ? new Date(val + "T00:00:00").toLocaleDateString(
-                          "en-GB",
-                          { weekday: "short", day: "numeric", month: "short" },
-                        )
-                      : prev.checkIn,
-                  }));
-                }}
+                onChange={(e) => updateDate("checkInIso", e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800"
               />
             </div>
@@ -192,32 +212,21 @@ export default function StepOne({
               <input
                 id="checkout-date-input"
                 type="date"
+                min={stayDetails.checkInIso}
                 value={stayDetails.checkOutIso}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setStayDetails((prev) => ({
-                    ...prev,
-                    checkOutIso: val,
-                    checkOut: val
-                      ? new Date(val + "T00:00:00").toLocaleDateString(
-                          "en-GB",
-                          { weekday: "short", day: "numeric", month: "short" },
-                        )
-                      : prev.checkOut,
-                  }));
-                }}
+                onChange={(e) => updateDate("checkOutIso", e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-800"
               />
             </div>
 
             <div className="flex items-center justify-between sm:justify-end gap-2">
               <span className="text-xs font-semibold text-indigo-700 bg-white px-3 py-2 rounded-lg border border-indigo-100">
-                {stayDetails.nights} nights
+                {plural(Math.max(nights, 0), "night")}
               </span>
               <button
                 type="button"
-                onClick={() => setIsDatePickerOpen(false)}
-                className="bg-indigo-600 text-white text-xs font-semibold px-3.5 py-2 rounded-lg hover:bg-indigo-700"
+                onClick={handleCheckAvailability}
+                className="bg-indigo-600 text-white text-xs font-semibold px-3.5 py-2 rounded-lg hover:bg-indigo-700 cursor-pointer"
               >
                 Apply
               </button>
@@ -225,74 +234,40 @@ export default function StepOne({
           </div>
         )}
 
-        {/* Expandable Guest & Quick Stay Perks Panel when Arrow Icon is Clicked */}
+        {/* Guest counter, opened by the arrow */}
         {isGuestMenuOpen && (
           <div
             id="guest-quick-panel"
-            className="guest-quick-panel bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3"
+            className="guest-quick-panel bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4"
           >
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-semibold text-slate-700">
-                  Guests:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => updateGuests(-1)}
-                  className="w-7 h-7 rounded-md bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100"
-                >
-                  -
-                </button>
-                <span className="text-sm font-bold text-slate-900">
-                  {stayDetails.guests}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => updateGuests(1)}
-                  className="w-7 h-7 rounded-md bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100"
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-semibold text-slate-700">
-                  Rooms:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => updateRoomsCount(-1)}
-                  className="w-7 h-7 rounded-md bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100"
-                >
-                  -
-                </button>
-                <span className="text-sm font-bold text-slate-900">
-                  {stayDetails.roomsCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => updateRoomsCount(1)}
-                  className="w-7 h-7 rounded-md bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100"
-                >
-                  +
-                </button>
-              </div>
-
-              <label className="flex items-center space-x-2 text-xs font-medium text-indigo-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={stayDetails.mobileKeyEnabled}
-                  onChange={(e) =>
-                    setStayDetails((prev) => ({
-                      ...prev,
-                      mobileKeyEnabled: e.target.checked,
-                    }))
-                  }
-                  className="rounded border-indigo-300 text-indigo-600"
-                />
-                <span>Enable instant digital room key</span>
-              </label>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-slate-700">
+                Guests:
+              </span>
+              <button
+                type="button"
+                onClick={() => updateGuests(-1)}
+                aria-label="Remove a guest"
+                className="w-7 h-7 rounded-md bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                -
+              </button>
+              <span className="text-sm font-bold text-slate-900">
+                {stayDetails.guests}
+              </span>
+              <button
+                type="button"
+                onClick={() => updateGuests(1)}
+                aria-label="Add a guest"
+                className="w-7 h-7 rounded-md bg-white border border-slate-200 font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                +
+              </button>
             </div>
+
+            <span className="text-xs font-medium text-indigo-700">
+              Every booking includes a digital room key after online check-in
+            </span>
           </div>
         )}
 
@@ -319,111 +294,136 @@ export default function StepOne({
               Choose your room
             </h2>
             <p className="rooms-subtitle text-xs text-slate-500 mt-0.5">
-              {rooms.filter((r) => !r.isSoldOut).length} room types available
-              for your stay
+              {isLoading
+                ? "Checking availability..."
+                : `${plural(availableCount, "room")} available for your stay`}
             </p>
           </div>
           <span className="nights-pill text-xs font-semibold bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full">
-            {stayDetails.nights} nights
+            {plural(Math.max(nights, 0), "night")}
           </span>
         </div>
 
-        <div className="rooms-stack space-y-4">
-          {rooms.map((room) => {
-            const isAlertSet = alertedRoomIds.includes(room.id);
+        {error && (
+          <div
+            role="alert"
+            className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-sm"
+          >
+            {error}
+          </div>
+        )}
 
-            return (
-              <article
-                key={room.id}
-                id={`room-card-${room.id}`}
-                className={`room-card bg-white p-5 rounded-2xl border transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
-                  room.isSoldOut
-                    ? "border-slate-200/80 opacity-90"
-                    : "border-slate-200 hover:border-indigo-200 shadow-sm"
-                }`}
-              >
-                <div className="room-card-details space-y-2">
-                  <div className="room-title-row flex items-center flex-wrap gap-2.5">
-                    <h3 className="room-name text-lg font-bold text-slate-900">
-                      {room.name}
-                    </h3>
-                    <span
-                      className={`room-status-badge text-xs font-semibold px-2.5 py-0.5 rounded-full ${
-                        room.statusVariant === "available"
-                          ? "bg-emerald-50 text-emerald-700"
-                          : room.statusVariant === "few-left"
-                            ? "bg-amber-50 text-amber-700"
-                            : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {room.status}
-                    </span>
-                  </div>
+        {isLoading && (
+          <p className="text-sm text-slate-500 text-center py-10">
+            Loading rooms... the first request can take up to a minute while
+            the server wakes up.
+          </p>
+        )}
 
-                  <div className="room-amenities-row flex flex-wrap items-center text-xs text-slate-500 gap-y-1">
-                    <span className="inline-flex items-center space-x-1">
-                      <img
-                        src={guestIcon}
-                        alt="Capacity"
-                        className="w-3.5 h-3.5 object-contain"
-                      />
-                      <span>{room.capacity}</span>
-                    </span>
-                    <span className="mx-2">•</span>
-                    <span>{room.bed}</span>
-                    <span className="mx-2">•</span>
-                    <span>{room.view}</span>
-                    {room.features.map((feat, idx) => (
-                      <span key={idx} className="inline-flex items-center">
-                        <span className="mx-2">•</span>
-                        <span>{feat}</span>
+        {!isLoading && !error && rooms.length === 0 && (
+          <p className="text-sm text-slate-500 text-center py-10 bg-white rounded-2xl border border-slate-200">
+            No rooms match your search. Try other dates or fewer guests.
+          </p>
+        )}
+
+        {!isLoading && (
+          <div className="rooms-stack space-y-4">
+            {rooms.map((room) => {
+              const features = [
+                room.bedType && `${room.bedType} bed`,
+                room.floor && `Floor ${room.floor}`,
+                ...(room.amenities || []),
+                room.sizeSqm && `${room.sizeSqm} sqm`,
+              ].filter(Boolean);
+
+              return (
+                <article
+                  key={room._id}
+                  id={`room-card-${room.roomNumber}`}
+                  className={`room-card bg-white p-5 rounded-2xl border transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
+                    room.isAvailable
+                      ? "border-slate-200 hover:border-indigo-200 shadow-sm"
+                      : "border-slate-200/80 opacity-90"
+                  }`}
+                >
+                  <div className="room-card-details space-y-2">
+                    <div className="room-title-row flex items-center flex-wrap gap-2.5">
+                      <h3 className="room-name text-lg font-bold text-slate-900">
+                        {room.name}
+                      </h3>
+                      <span className="text-xs text-slate-400 font-medium">
+                        Room {room.roomNumber}
                       </span>
-                    ))}
-                    <span className="mx-2">•</span>
-                    <span>{room.size}</span>
+                      <span
+                        className={`room-status-badge text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                          room.isAvailable
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {room.isAvailable ? "Available" : "Booked"}
+                      </span>
+                    </div>
+
+                    <div className="room-amenities-row flex flex-wrap items-center text-xs text-slate-500 gap-y-1">
+                      <span className="inline-flex items-center space-x-1">
+                        <img
+                          src={guestIcon}
+                          alt="Capacity"
+                          className="w-3.5 h-3.5 object-contain"
+                        />
+                        <span>Up to {plural(room.capacity, "guest")}</span>
+                      </span>
+                      {features.map((feature) => (
+                        <span key={feature} className="inline-flex items-center">
+                          <span className="mx-2">•</span>
+                          <span>{feature}</span>
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="room-rate-block pt-1">
+                      <span className="rate-caption text-xs text-slate-400 block">
+                        Nightly rate
+                      </span>
+                      <p className="rate-value text-xs font-semibold text-slate-700">
+                        {formatNaira(room.pricePerNight)} / night ·{" "}
+                        {formatNaira(room.totalPrice)} for{" "}
+                        {plural(room.nights, "night")}
+                      </p>
+                      {!room.isAvailable && (
+                        <p className="soldout-hint text-xs text-slate-500 font-medium mt-0.5">
+                          Not available for these dates
+                        </p>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="room-rate-block pt-1">
-                    <span className="rate-caption text-xs text-slate-400 block">
-                      Nightly rate
-                    </span>
-                    <p className="rate-value text-xs font-semibold text-slate-700">
-                      {room.rateLabel}
-                    </p>
-                    {room.isSoldOut && (
-                      <p className="soldout-hint text-xs text-indigo-600 font-medium mt-0.5">
-                        {isAlertSet
-                          ? "Availability alert active for this room"
-                          : "Get an availability alert"}
-                      </p>
+                  <div className="room-card-action w-full md:w-auto">
+                    {room.isAvailable ? (
+                      <button
+                        type="button"
+                        onClick={() => onSelectRoom(room)}
+                        className="select-room-btn w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition-colors flex items-center justify-center space-x-2 cursor-pointer"
+                      >
+                        <span>Select</span>
+                        <span aria-hidden="true">→</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="w-full md:w-auto bg-slate-100 text-slate-400 text-sm font-semibold px-5 py-2.5 rounded-xl cursor-not-allowed"
+                      >
+                        Unavailable
+                      </button>
                     )}
                   </div>
-                </div>
-
-                <div className="room-card-action w-full md:w-auto">
-                  {room.isSoldOut ? (
-                    <button
-                      type="button"
-                      onClick={() => toggleAlertRoom(room.id)}
-                      className="notify-btn w-full md:w-auto bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors cursor-pointer"
-                    >
-                      {isAlertSet ? "Alert set ✓" : "Notify me"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onSelectRoom(room)}
-                      className="select-room-btn w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition-colors flex items-center justify-center space-x-2 cursor-pointer"
-                    >
-                      <span>Select</span>
-                      <span aria-hidden="true">→</span>
-                    </button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Footer Note */}

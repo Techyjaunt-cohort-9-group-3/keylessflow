@@ -1,54 +1,55 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getErrorMessage } from "../api/client";
+import { cancelBooking, initializePayment } from "../api/services";
 import cancelIcon from "../assets/cancel-icon.png";
 import protectIcon from "../assets/protect-icon.png";
-import switchIcon from "../assets/switch-icon.png";
+import { formatDate, formatNaira } from "../utils/format";
 
-export default function StepThree({
-  room,
-  stayDetails,
-  totalAmount,
-  onBack,
-  onResetBooking,
-}) {
-  const [paymentMethod, setPaymentMethod] = useState("Card");
-  const [cardDetails, setCardDetails] = useState({
-    cardNumber: "",
-    expiry: "",
-    cvv: "",
-  });
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
+export default function StepThree({ booking, onBack, onCancelled }) {
+  const [now, setNow] = useState(() => Date.now());
+  const [error, setError] = useState("");
+  const [isPaying, setIsPaying] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  const formattedTotal = `₦${(totalAmount || 160000).toLocaleString()}`;
+  // Tick every second to count down the room hold
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-  const handlePaySubmit = (e) => {
-    e.preventDefault();
-    setPaymentSuccess(true);
+  const holdEndsAt = new Date(booking.holdExpiresAt).getTime();
+  const secondsLeft = Math.max(0, Math.floor((holdEndsAt - now) / 1000));
+  const minutes = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
+  const seconds = String(secondsLeft % 60).padStart(2, "0");
+  const holdExpired = secondsLeft === 0;
+  const formattedTotal = formatNaira(booking.amount);
+
+  const handlePay = async () => {
+    setError("");
+    setIsPaying(true);
+    try {
+      const payment = await initializePayment(booking.reference);
+      // Paystack's secure page takes the payment, then sends the guest
+      // back to this app with ?reference=... (see PaymentCallback)
+      window.location.href = payment.authorizationUrl;
+    } catch (err) {
+      setError(getErrorMessage(err));
+      setIsPaying(false);
+    }
   };
 
-  if (paymentSuccess) {
-    return (
-      <section
-        id="step-three-payment-success"
-        className="max-w-xl mx-auto bg-white p-8 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4"
-      >
-        <h1 className="text-2xl font-bold text-slate-900">Booking Confirmed</h1>
-        <p className="text-sm text-slate-600">
-          Your reservation for <strong>{room?.name || "Deluxe room"}</strong> (
-          {stayDetails.checkIn} – {stayDetails.checkOut}) has been received.
-        </p>
-        <p className="text-lg font-extrabold text-indigo-600">
-          {formattedTotal} Paid
-        </p>
-        <button
-          type="button"
-          onClick={onResetBooking}
-          className="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-6 py-3 rounded-xl cursor-pointer"
-        >
-          Start another booking
-        </button>
-      </section>
-    );
-  }
+  const handleCancel = async () => {
+    if (!window.confirm("Cancel this booking and release the room?")) return;
+    setError("");
+    setIsCancelling(true);
+    try {
+      await cancelBooking(booking.reference);
+      onCancelled();
+    } catch (err) {
+      setError(getErrorMessage(err));
+      setIsCancelling(false);
+    }
+  };
 
   return (
     <section
@@ -77,194 +78,113 @@ export default function StepThree({
         <span className="text-xs font-medium text-slate-400">Amount due</span>
         <p className="text-3xl font-black text-slate-900">{formattedTotal}</p>
         <p className="text-xs text-slate-500 pt-1">
-          {room?.name || "Deluxe room"}, {stayDetails.checkIn} -{" "}
-          {stayDetails.checkOut}
+          {booking.roomSnapshot?.name}, {formatDate(booking.checkInDate, false)}{" "}
+          - {formatDate(booking.checkOutDate, false)}
+        </p>
+        <p className="text-xs text-slate-400">
+          Booking reference{" "}
+          <strong className="text-slate-700">{booking.reference}</strong>
         </p>
       </div>
 
-      {/* Payment Options */}
-      <div className="payment-options-group space-y-3">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
-          Payment options
+      {/* Room hold countdown */}
+      <div
+        id="room-hold-timer"
+        className={`border p-3.5 rounded-xl flex items-center justify-between text-xs font-medium ${
+          holdExpired
+            ? "bg-rose-50 border-rose-200 text-rose-700"
+            : "bg-amber-50 border-amber-200/80 text-amber-900"
+        }`}
+      >
+        <span>
+          {holdExpired
+            ? "Your hold on this room has expired"
+            : "Room held for you"}
         </span>
-        <div className="grid grid-cols-3 gap-2">
-          {["Card", "Bank transfer", "USSD"].map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => setPaymentMethod(option)}
-              className={`py-2.5 px-3 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                paymentMethod === option
-                  ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
-                  : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
+        {!holdExpired && (
+          <span className="font-bold tabular-nums">
+            {minutes}:{seconds} min left
+          </span>
+        )}
       </div>
 
-      {/* Payment Form */}
-      <form
-        onSubmit={handlePaySubmit}
-        className="payment-form-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4"
-      >
-        {paymentMethod === "Card" && (
-          <>
-            <h2 className="text-sm font-bold text-slate-800">
-              Enter your card details to pay
-            </h2>
+      {/* Pay with Paystack */}
+      <div className="payment-form-card bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">
+            Payment options
+          </span>
+          <div className="grid grid-cols-3 gap-2">
+            {["Card", "Bank transfer", "USSD"].map((option) => (
+              <span
+                key={option}
+                className="py-2.5 px-3 rounded-xl text-xs font-semibold text-center bg-slate-50 border border-slate-200 text-slate-600"
+              >
+                {option}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500">
+            You&apos;ll choose how to pay on Paystack&apos;s secure page, then
+            come back here automatically.
+          </p>
+        </div>
 
-            <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="card-number-input"
-                  className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider block mb-1"
-                >
-                  Card number
-                </label>
-                <input
-                  id="card-number-input"
-                  type="text"
-                  placeholder="0000 0000 0000 0000"
-                  value={cardDetails.cardNumber}
-                  onChange={(e) =>
-                    setCardDetails((prev) => ({
-                      ...prev,
-                      cardNumber: e.target.value,
-                    }))
-                  }
-                  className="w-full bg-white border border-indigo-300 rounded-xl px-4 py-3 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label
-                    htmlFor="card-expiry-input"
-                    className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1"
-                  >
-                    Card expiry
-                  </label>
-                  <input
-                    id="card-expiry-input"
-                    type="text"
-                    placeholder="MM / YY"
-                    value={cardDetails.expiry}
-                    onChange={(e) =>
-                      setCardDetails((prev) => ({
-                        ...prev,
-                        expiry: e.target.value,
-                      }))
-                    }
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="card-cvv-input"
-                    className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1"
-                  >
-                    CVV
-                  </label>
-                  <input
-                    id="card-cvv-input"
-                    type="password"
-                    maxLength={4}
-                    placeholder="123"
-                    value={cardDetails.cvv}
-                    onChange={(e) =>
-                      setCardDetails((prev) => ({
-                        ...prev,
-                        cvv: e.target.value,
-                      }))
-                    }
-                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600"
-                  />
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {paymentMethod === "Bank transfer" && (
-          <div className="text-center py-6 text-slate-600 text-sm space-y-1">
-            <p className="font-semibold text-slate-800">
-              Paystack Virtual Account
-            </p>
-            <p className="text-xs text-slate-500">
-              A temporary transfer account for {formattedTotal} will be
-              generated when you click pay.
-            </p>
+        {error && (
+          <div
+            role="alert"
+            className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-sm"
+          >
+            {error}
           </div>
         )}
 
-        {paymentMethod === "USSD" && (
-          <div className="text-center py-6 text-slate-600 text-sm space-y-1">
-            <p className="font-semibold text-slate-800">Authorize via USSD</p>
-            <p className="text-xs text-slate-500">
-              Dial your bank&apos;s USSD string to complete {formattedTotal}{" "}
-              immediately.
-            </p>
-          </div>
+        {holdExpired ? (
+          <button
+            type="button"
+            onClick={onCancelled}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition-colors shadow-sm text-sm cursor-pointer"
+          >
+            Start a new booking
+          </button>
+        ) : (
+          <button
+            type="button"
+            id="pay-now-btn"
+            onClick={handlePay}
+            disabled={isPaying}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition-colors shadow-sm text-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isPaying ? "Opening Paystack..." : `Pay ${formattedTotal}`}
+          </button>
         )}
-
-        <button
-          type="submit"
-          id="pay-now-btn"
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition-colors shadow-sm text-sm cursor-pointer"
-        >
-          Pay {formattedTotal}
-        </button>
-      </form>
+      </div>
 
       {/* Secondary Actions */}
-      <div className="payment-secondary-actions text-center space-y-2.5 pt-1">
+      <div className="payment-secondary-actions flex flex-wrap items-center justify-center gap-3 text-xs pt-1">
         <button
           type="button"
           onClick={onBack}
-          className="text-xs font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
+          className="font-semibold text-slate-500 hover:text-slate-800 cursor-pointer"
         >
-          Cancel
+          Back to details
         </button>
 
-        <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
+        {!holdExpired && (
           <button
             type="button"
-            onClick={() =>
-              setPaymentMethod((prev) =>
-                prev === "Card"
-                  ? "Bank transfer"
-                  : prev === "Bank transfer"
-                    ? "USSD"
-                    : "Card",
-              )
-            }
-            className="inline-flex items-center space-x-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-slate-700 hover:bg-slate-50 cursor-pointer"
-          >
-            <img
-              src={switchIcon}
-              alt="Switch method"
-              className="w-3.5 h-3.5 object-contain"
-            />
-            <span>Change Payment Method</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center space-x-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 cursor-pointer"
+            onClick={handleCancel}
+            disabled={isCancelling}
+            className="inline-flex items-center space-x-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-rose-600 hover:bg-rose-50 cursor-pointer disabled:opacity-60"
           >
             <img
               src={cancelIcon}
-              alt="Cancel payment"
+              alt="Cancel booking"
               className="w-3.5 h-3.5 object-contain"
             />
-            <span>Cancel Payment</span>
+            <span>{isCancelling ? "Cancelling..." : "Cancel booking"}</span>
           </button>
-        </div>
+        )}
       </div>
 
       <div className="text-center pt-2 text-xs text-slate-500 flex items-center justify-center space-x-1.5">

@@ -16,6 +16,7 @@ import {
   cardClass,
   inputClass,
 } from "../components/ui";
+import RoomsPanel from "../components/RoomsPanel";
 import { formatDate, formatDateTime, formatNaira, statusLabel } from "../utils/format";
 
 const TABS = [
@@ -23,6 +24,7 @@ const TABS = [
   { key: "checkins", label: "Check-ins" },
   { key: "bookings", label: "Bookings" },
 ];
+const ADMIN_TABS = [...TABS, { key: "rooms", label: "Rooms" }];
 
 const smallButton =
   "text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer";
@@ -258,15 +260,17 @@ function BookingsPanel() {
   );
 }
 
-export default function StaffDashboard() {
+export default function StaffDashboard({ user }) {
   const [tab, setTab] = useState("requests");
+  const isAdmin = user?.role === "admin";
+  const tabs = isAdmin ? ADMIN_TABS : TABS;
 
   return (
     <section className="space-y-6">
-      <PageHeader eyebrow="Front desk" title="Staff dashboard" />
+      <PageHeader eyebrow={isAdmin ? "Admin" : "Front desk"} title="Staff dashboard" />
 
       <div className="flex flex-wrap gap-2">
-        {TABS.map((item) => (
+        {tabs.map((item) => (
           <button
             key={item.key}
             type="button"
@@ -285,6 +289,7 @@ export default function StaffDashboard() {
       {tab === "requests" && <RequestsPanel />}
       {tab === "checkins" && <CheckInsPanel />}
       {tab === "bookings" && <BookingsPanel />}
+      {tab === "rooms" && isAdmin && <RoomsPanel />}
     </section>
   );
 }

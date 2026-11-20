@@ -260,7 +260,7 @@ export default function App() {
             path="/staff"
             element={
               <RequireAuth user={user} allow="staff">
-                <StaffDashboard />
+                <StaffDashboard user={user} />
               </RequireAuth>
             }
           />

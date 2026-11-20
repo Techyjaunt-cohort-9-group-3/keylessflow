@@ -86,7 +86,7 @@ All paths are under `/api/v1`. Access: **public** = no token, **guest** / **staf
 
 | Method | Path                                | Access       | Purpose                                          |
 | ------ | ----------------------------------- | ------------ | ------------------------------------------------ |
-| GET    | `/rooms`                            | public       | List rooms (`type`, `guests`, `minPrice`, `maxPrice`) |
+| GET    | `/rooms`                            | public       | List rooms (`type`, `guests`, `minPrice`, `maxPrice`; admins can add `includeInactive=true`) |
 | GET    | `/rooms/availability`               | public       | Free rooms for `checkInDate`/`checkOutDate`, with total price |
 | GET    | `/rooms/:id`                        | public       | Room details (add dates to get `isAvailable`)    |
 | POST   | `/rooms`, PATCH `/rooms/:id`        | admin        | Manage rooms                                     |

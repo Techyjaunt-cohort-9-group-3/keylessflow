@@ -18,6 +18,13 @@ export const changePassword = (body) =>
 export const getAvailableRooms = (params) =>
   api.get("/rooms/availability", { params }).then(unwrap);
 
+// Admin: every room, including hidden ones
+export const getAllRooms = () =>
+  api.get("/rooms", { params: { includeInactive: true } }).then(unwrap);
+export const createRoom = (body) => api.post("/rooms", body).then(unwrap);
+export const updateRoom = (id, body) =>
+  api.patch(`/rooms/${id}`, body).then(unwrap);
+
 // ---------- Bookings ----------
 export const createBooking = (body) => api.post("/bookings", body).then(unwrap);
 export const getBookings = (params) =>

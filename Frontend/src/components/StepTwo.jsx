@@ -122,7 +122,8 @@ export default function StepTwo({
                   {room.name}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Room {room.roomNumber} · {room.bedType} bed
+                  Room {room.roomNumber}
+                  {room.bedType && ` · ${room.bedType} bed`}
                 </p>
               </div>
               <button
@@ -199,8 +200,12 @@ export default function StepTwo({
                 />
                 <span>{plural(stayDetails.guests, "guest")}</span>
               </span>
-              <span className="mx-2">•</span>
-              <span>{room.bedType} bed</span>
+              {room.bedType && (
+                <>
+                  <span className="mx-2">•</span>
+                  <span>{room.bedType} bed</span>
+                </>
+              )}
               {room.sizeSqm && (
                 <>
                   <span className="mx-2">•</span>

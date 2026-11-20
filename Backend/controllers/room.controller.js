@@ -34,9 +34,12 @@ function roomFilter(query) {
   return filter;
 }
 
-// GET /rooms?type=deluxe&guests=2&minPrice=&maxPrice=
+// GET /rooms?type=deluxe&guests=2&minPrice=&maxPrice=&includeInactive=true
 async function listRooms(req, res) {
-  const rooms = await Room.find(roomFilter(req.query)).sort({ pricePerNight: 1, roomNumber: 1 });
+  const filter = roomFilter(req.query);
+  // Admins can also list hidden rooms so they can make them bookable again
+  if (req.query.includeInactive === 'true' && req.user?.role === 'admin') delete filter.isActive;
+  const rooms = await Room.find(filter).sort({ pricePerNight: 1, roomNumber: 1 });
   res.json({ success: true, data: rooms });
 }
 
